@@ -5,6 +5,7 @@ import (
 	"io"
 	"net"
 	"os"
+	"sync"
 )
 
 func handleParseResult(parseRes ParseResult) error {
@@ -26,7 +27,7 @@ func clientMode(address net.TCPAddr) {
 		fmt.Printf("\rTcp dial errors: %v\n", err)
 		os.Exit(1)
 	}
-	fmt.Printf("\rConnected to Server, ready to send message\n\n")
+	fmt.Printf("\rConnected to Server with local addr %s\n\n", conn.LocalAddr())
 	go func() {
 		for {
 			readFromConn("", conn)
@@ -35,20 +36,48 @@ func clientMode(address net.TCPAddr) {
 
 	go func() {
 		for {
-			scanfInput(&[]*net.TCPConn{conn})
+			var input string
+			_, err := fmt.Scanln(&input)
+			if err != nil {
+				fmt.Printf("\rScan user input errors: %v\n", err)
+			} else {
+				conn.Write([]byte(input))
+				fmt.Printf("> ")
+			}
 		}
 	}()
 }
 
 func serverMode(address net.TCPAddr) {
+	mutex := &sync.RWMutex{}
 	var conns []*net.TCPConn
-	//mutex := &sync.Mutex{}
 	l, err := net.ListenTCP("tcp", &address)
 	fmt.Printf("\rWaiting for client...\n")
 	if err != nil {
 		fmt.Printf("\rTcp listen errors: %v\n", err)
 	}
 	defer l.Close()
+
+	go func() {
+		for {
+			if len(conns) == 0 {
+				continue
+			}
+			var input string
+			_, err := fmt.Scanln(&input)
+			if err != nil {
+				fmt.Printf("\rScan user input errors: %v\n", err)
+			} else {
+				mutex.RLock()
+				for _, conn := range conns {
+					conn.Write([]byte(input))
+				}
+				mutex.RUnlock()
+				fmt.Printf("> ")
+			}
+		}
+	}()
+
 	for {
 		conn, err := l.AcceptTCP()
 		if err != nil {
@@ -56,13 +85,11 @@ func serverMode(address net.TCPAddr) {
 			break
 		}
 		addr := conn.RemoteAddr().String()
-		fmt.Printf("Client %v connect\n", addr)
+		fmt.Printf("\rClient %v connect\n", addr)
+		fmt.Print("> ")
+		mutex.Lock()
 		conns = append(conns, conn)
-		go func() {
-			for {
-				scanfInput(&conns)
-			}
-		}()
+		mutex.Unlock()
 		go func() {
 			for {
 				readFromConn(addr+"> ", conn)
@@ -76,29 +103,13 @@ func readFromConn(connMark string, conn *net.TCPConn) {
 	reqLen, err := conn.Read(buf)
 	if err != nil {
 		if err == net.ErrClosed || err == io.EOF {
-			fmt.Printf("\rConnection closed by server, exiting...\n")
+			fmt.Printf("\rConnection closed, exiting...\n")
 			os.Exit(0)
 		}
 	}
 	if reqLen > 0 {
 		fmt.Print("\r", "                                                              ")
-
 		fmt.Printf("\r%s%s\n", connMark, buf[:reqLen])
 		fmt.Print("> ")
-	}
-}
-
-func scanfInput(conns *[]*net.TCPConn) {
-	if len(*conns) < 1 {
-		return
-	}
-	var input string
-	fmt.Printf("> ")
-	_, err := fmt.Scanf("%s\n", &input)
-	if err != nil {
-		fmt.Printf("\rScan user input errors: %v\n", err)
-	}
-	for _, conn := range *conns {
-		conn.Write([]byte(input))
 	}
 }
