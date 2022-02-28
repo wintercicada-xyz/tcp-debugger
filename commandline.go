@@ -13,21 +13,24 @@ Tcp debugger
 Usage: td [options][<host>:<port>]
 
 Options
-  -c                       client mode
-  -l                       listener mode
+  -c                       Client mode
+  -l                       Server mode
+  -h        --help         Print usage
+            --hex          HEX mode
 
 `
 
 type Flag int
 
 const (
-	ClientMode int = iota
-	ServerMode
+	ClientFlag Flag = iota
+	ServerFlag
+	HexFlag
 )
 
 type ParseResult struct {
 	tcpAddr net.TCPAddr
-	flags   []Flag
+	flags   map[Flag]string
 }
 
 func parseArgs(args []string) (ParseResult, error) {
@@ -52,20 +55,18 @@ func parseArgs(args []string) (ParseResult, error) {
 	parseResult.tcpAddr = *tcpAddr
 
 	// scan flag in the args
-	flags := []Flag{}
+	flags := make(map[Flag]string)
 	for _, arg := range args[1 : len(args)-1] {
 		switch arg {
 		case "-c":
-			flags = append(flags, Flag(ClientMode))
+			flags[ClientFlag] = ""
 		case "-l":
-			flags = append(flags, Flag(ServerMode))
+			flags[ServerFlag] = ""
+		case "--hex":
+			flags[HexFlag] = ""
+		default:
+			return parseResult, errors.New("illegal flag: " + arg)
 		}
-	}
-	if len(flags) > 1 { // "-c" flag and "-l" flag can't coexist
-		return parseResult, errors.New("can't run in client mode and server mode in the same time")
-	}
-	if len(flags) == 0 {
-		return parseResult, errors.New("td should run in client mode or server mode")
 	}
 	parseResult.flags = flags
 
