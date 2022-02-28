@@ -28,9 +28,12 @@ func clientMode(address net.TCPAddr) {
 		os.Exit(1)
 	}
 	fmt.Printf("\rConnected to Server with local addr %s\n\n", conn.LocalAddr())
+	fmt.Printf("> ")
 	go func() {
 		for {
-			readFromConn("", conn)
+			if readFromConn("", conn) != nil {
+				os.Exit(1)
+			}
 		}
 	}()
 
@@ -50,7 +53,7 @@ func clientMode(address net.TCPAddr) {
 
 func serverMode(address net.TCPAddr) {
 	mutex := &sync.RWMutex{}
-	var conns []*net.TCPConn
+	conns := make(map[*net.TCPConn]struct{})
 	l, err := net.ListenTCP("tcp", &address)
 	fmt.Printf("\rWaiting for client...\n")
 	if err != nil {
@@ -69,7 +72,7 @@ func serverMode(address net.TCPAddr) {
 				fmt.Printf("\rScan user input errors: %v\n", err)
 			} else {
 				mutex.RLock()
-				for _, conn := range conns {
+				for conn := range conns {
 					conn.Write([]byte(input))
 				}
 				mutex.RUnlock()
@@ -88,23 +91,33 @@ func serverMode(address net.TCPAddr) {
 		fmt.Printf("\rClient %v connect\n", addr)
 		fmt.Print("> ")
 		mutex.Lock()
-		conns = append(conns, conn)
+		conns[conn] = struct{}{}
 		mutex.Unlock()
 		go func() {
 			for {
-				readFromConn(addr+"> ", conn)
+				err = readFromConn(addr+"> ", conn)
+				if err != nil {
+					mutex.Lock()
+					delete(conns, conn)
+					if len(conns) != 0 {
+						fmt.Print("> ")
+					}
+					mutex.Unlock()
+					break
+				}
+
 			}
 		}()
 	}
 }
 
-func readFromConn(connMark string, conn *net.TCPConn) {
+func readFromConn(connMark string, conn *net.TCPConn) error {
 	buf := make([]byte, 1024)
 	reqLen, err := conn.Read(buf)
 	if err != nil {
 		if err == net.ErrClosed || err == io.EOF {
-			fmt.Printf("\rConnection closed, exiting...\n")
-			os.Exit(0)
+			fmt.Printf("\rConnection to %s closed\n", conn.RemoteAddr())
+			return err
 		}
 	}
 	if reqLen > 0 {
@@ -112,4 +125,5 @@ func readFromConn(connMark string, conn *net.TCPConn) {
 		fmt.Printf("\r%s%s\n", connMark, buf[:reqLen])
 		fmt.Print("> ")
 	}
+	return nil
 }
