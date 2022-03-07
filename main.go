@@ -8,9 +8,14 @@ import (
 func main() {
 	parseRes, err := parseArgs(os.Args)
 	if err != nil {
-		fmt.Println("Failed to parse arguments: ", err.Error())
+		fmt.Printf("\r%s\n", err.Error())
+		os.Exit(1)
 	}
-	handleParseResult(parseRes)
+	err = handleParseResult(parseRes)
+	if err != nil {
+		fmt.Printf("\r%s\n", err.Error())
+		os.Exit(1)
+	}
 	for {
 		select {}
 	}

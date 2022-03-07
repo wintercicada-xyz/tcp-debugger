@@ -1,12 +1,10 @@
 package main
 
 import (
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
 	"net"
-	"os"
 	"sync"
 )
 
@@ -30,131 +28,164 @@ func handleParseResult(parseRes ParseResult) error {
 		flag = HexFlag
 	}
 	if clientFlag {
-		clientMode(parseRes.tcpAddr, flag)
+		clientM(parseRes.tcpAddr, flag, 1)
 	} else if serverFlag {
-		serverMode(parseRes.tcpAddr, flag)
+		serverM(parseRes.tcpAddr, flag)
 	}
 	return nil
 }
 
-func clientMode(address net.TCPAddr, mode Flag) {
-	conn, err := net.DialTCP("tcp", nil, &address)
-	if err != nil {
-		fmt.Printf("\rTcp dial errors: %v\n", err)
-		os.Exit(1)
+func clientM(address net.TCPAddr, mode Flag, connCount int) {
+	pool := CreatePool()
+	rch := make(chan Message)
+	ich := make(chan []byte)
+	go readInput(ich, mode == HexFlag, func() {
+		if !pool.IsEmpty() {
+			fmt.Print("\r> ")
+		} else {
+			fmt.Print("\r \r")
+		}
+	})
+	go pool.HandleWriteToAll(ich)
+	go writeMessage(rch, mode == HexFlag, func(addr string) {
+		pool.DeleteConn(addr)
+		if !pool.IsEmpty() {
+			fmt.Print("\r> ")
+		} else {
+			fmt.Print("\r \r")
+		}
+	})
+	for i := 0; i < connCount; i++ {
+		conn, err := net.DialTCP("tcp", nil, &address)
+		if err != nil {
+			fmt.Printf("\rTcp dial errors: %v\n", err)
+			continue
+		}
+		addr := conn.LocalAddr().String()
+		fmt.Printf("\rConnect to server as %v\n", addr)
+		fmt.Print("\r> ")
+		myConn := MyConn{conn, make(chan []byte)}
+		go myConn.HandleWrite()
+		go pool.AddConn(myConn, conn.LocalAddr().String())
+		go myConn.HandleReceive(rch)
 	}
-	fmt.Printf("\rConnected to Server with local addr %s\n\n", conn.LocalAddr())
-	fmt.Printf("> ")
-	go func() {
-		for {
-			if readFromConn("", conn, mode == HexFlag) != nil {
-				os.Exit(1)
-			}
-		}
-	}()
-
-	go func() {
-		for {
-			input, err := scan(mode == HexFlag)
-			if err != nil {
-				fmt.Printf("\rScan user input errors: %v\n", err)
-			} else {
-				conn.Write(input)
-			}
-			fmt.Printf("> ")
-		}
-	}()
+	for {
+		select {}
+	}
 }
 
-func serverMode(address net.TCPAddr, mode Flag) {
-	mutex := &sync.RWMutex{}
-	conns := make(map[*net.TCPConn]struct{})
+func serverM(address net.TCPAddr, mode Flag) {
 	l, err := net.ListenTCP("tcp", &address)
-	fmt.Printf("\rWaiting for client...\n")
 	if err != nil {
 		fmt.Printf("\rTcp listen errors: %v\n", err)
 	}
 	defer l.Close()
 
-	go func() {
-		for {
-			if len(conns) == 0 {
-				continue
-			}
-			input, err := scan(mode == HexFlag)
-			if err != nil {
-				fmt.Printf("\rScan user input errors: %v\n", err)
-			} else {
-				mutex.RLock()
-				for conn := range conns {
-					conn.Write(input)
-				}
-				mutex.RUnlock()
-			}
-			fmt.Printf("> ")
+	pool := CreatePool()
+	rch := make(chan Message)
+	ich := make(chan []byte)
+	go readInput(ich, mode == HexFlag, func() {
+		if !pool.IsEmpty() {
+			fmt.Print("\r> ")
+		} else {
+			fmt.Print("\r")
 		}
-	}()
-
+	})
+	go pool.HandleWriteToAll(ich)
+	go writeMessage(rch, mode == HexFlag, func(addr string) {
+		pool.DeleteConn(addr)
+		if !pool.IsEmpty() {
+			fmt.Print("\r> ")
+		} else {
+			fmt.Print("\r  ")
+		}
+	})
 	for {
 		conn, err := l.AcceptTCP()
 		if err != nil {
 			fmt.Printf("\rTcp accept errors: %v\n", err)
-			break
+			continue
 		}
 		addr := conn.RemoteAddr().String()
 		fmt.Printf("\rClient %v connect\n", addr)
-		fmt.Print("> ")
-		mutex.Lock()
-		conns[conn] = struct{}{}
-		mutex.Unlock()
-		go func() {
-			for {
-				err = readFromConn(addr+"> ", conn, mode == HexFlag)
-				if err != nil {
-					mutex.Lock()
-					delete(conns, conn)
-					if len(conns) != 0 {
-						fmt.Print("> ")
-					}
-					mutex.Unlock()
-					break
-				}
-
-			}
-		}()
+		fmt.Print("\r> ")
+		myConn := MyConn{conn, make(chan []byte)}
+		go myConn.HandleWrite()
+		go pool.AddConn(myConn, conn.RemoteAddr().String())
+		go myConn.HandleReceive(rch)
 	}
 }
 
-func readFromConn(connMark string, conn *net.TCPConn, isHexMode bool) error {
+type Pool struct {
+	conns map[string]MyConn
+	lock  *sync.RWMutex
+}
+
+func CreatePool() Pool {
+	return Pool{
+		make(map[string]MyConn),
+		&sync.RWMutex{},
+	}
+
+}
+
+func (pool Pool) IsEmpty() bool {
+	return len(pool.conns) == 0
+}
+
+func (pool Pool) AddConn(conn MyConn, mark string) {
+	pool.lock.Lock()
+	pool.conns[mark] = conn
+	pool.lock.Unlock()
+}
+func (pool Pool) DeleteConn(addr string) {
+	pool.lock.Lock()
+	delete(pool.conns, addr)
+	pool.lock.Unlock()
+}
+
+func (pool Pool) HandleWriteToAll(ch chan []byte) {
+	for {
+		msg := <-ch
+		pool.lock.RLock()
+		//fmt.Println(pool.conns)
+		for _, c := range pool.conns {
+			c.ch <- msg
+		}
+		pool.lock.RUnlock()
+	}
+}
+
+type MyConn struct {
+	c  *net.TCPConn
+	ch chan []byte
+}
+
+type Message struct {
+	addr string
+	msg  []byte
+}
+
+func (conn MyConn) HandleWrite() {
+	for msg := range conn.ch {
+		conn.c.Write(msg)
+	}
+}
+
+func (conn MyConn) HandleReceive(ch chan Message) {
+	addr := conn.c.RemoteAddr().String()
 	buf := make([]byte, 1024)
-	reqLen, err := conn.Read(buf)
-	if err != nil {
-		if err == net.ErrClosed || err == io.EOF {
-			fmt.Printf("\rConnection to %s closed\n", conn.RemoteAddr())
-			return err
+	for {
+		reqLen, err := conn.c.Read(buf)
+		if err != nil {
+			if err == net.ErrClosed || err == io.EOF {
+				fmt.Printf("\rConnection to %s closed\n", addr)
+				ch <- Message{addr, []byte{}}
+				break
+			}
+		}
+		if reqLen > 0 {
+			ch <- Message{addr, buf[:reqLen]}
 		}
 	}
-	if reqLen > 0 {
-		fmt.Print("\r", "                                                              ")
-		if isHexMode {
-			fmt.Printf("\r%s% X\n", connMark, buf[:reqLen])
-		} else {
-			fmt.Printf("\r%s%s\n", connMark, buf[:reqLen])
-		}
-		fmt.Print("> ")
-	}
-	return nil
-}
-
-func scan(isHexMode bool) ([]byte, error) {
-	var input string
-	_, err := fmt.Scanln(&input)
-	if isHexMode {
-		res, err := hex.DecodeString(input)
-		return res, err
-	} else {
-		res := []byte(input)
-		return res, err
-	}
-
 }

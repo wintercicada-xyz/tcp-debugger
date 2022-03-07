@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"net"
@@ -71,4 +72,41 @@ func parseArgs(args []string) (ParseResult, error) {
 	parseResult.flags = flags
 
 	return parseResult, nil
+}
+
+func readInput(ch chan []byte, isHexMode bool, doAfterInput func()) {
+	for {
+		var input string
+		_, err := fmt.Scanln(&input)
+		if err != nil {
+			fmt.Println("\rFailed to scan user input")
+		} else {
+			if isHexMode {
+				res, err := hex.DecodeString(input)
+				if err != nil {
+					fmt.Println(err)
+				} else {
+					ch <- res
+				}
+			} else {
+				ch <- []byte(input)
+			}
+		}
+		doAfterInput()
+	}
+}
+
+func writeMessage(ch chan Message, isHexMode bool, handleConnCloseFn func(string)) {
+	for {
+		msg := <-ch
+		if len(msg.msg) == 0 { // conn close
+			handleConnCloseFn(msg.addr)
+		} else {
+			if isHexMode {
+				fmt.Printf("\r%s> % X\n> ", msg.addr, msg.msg)
+			} else {
+				fmt.Printf("\r%s> %s\n> ", msg.addr, msg.msg)
+			}
+		}
+	}
 }
