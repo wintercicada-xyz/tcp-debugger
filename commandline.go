@@ -2,7 +2,7 @@ package main
 
 import (
 	"encoding/hex"
-	"errors"
+	"flag"
 	"fmt"
 	"net"
 	"os"
@@ -14,64 +14,83 @@ Tcp debugger
 Usage: td [options][<host>:<port>]
 
 Options
-  -c                       Client mode
-  -l                       Server mode
-  -h        --help         Print usage
-            --hex          HEX mode
+  -c                   Client mode
+  -s                   Server mode
+  -h                   Print usage
+  -H                   HEX mode
+  -m threadcount       Multithreaded mode (Client mode only)
 
 `
 
-type Flag int
+type Mode bool
 
 const (
-	ClientFlag Flag = iota
-	ServerFlag
-	HexFlag
+	Client Mode = true
+	Server Mode = false
 )
 
 type ParseResult struct {
 	tcpAddr net.TCPAddr
-	flags   map[Flag]string
+	mode    Mode
+	HEX     bool
+	thread  int
 }
 
-func parseArgs(args []string) (ParseResult, error) {
-	parseResult := ParseResult{}
-
-	// check args len to ensure tcp address exist
-	if len(args) < 2 {
-		return parseResult, errors.New("tcp address not found")
+func (parseRes ParseResult) Handle() {
+	if parseRes.mode == Client {
+		clientMode(parseRes.tcpAddr, parseRes.HEX, parseRes.thread)
+	} else {
+		serverMode(parseRes.tcpAddr, parseRes.HEX)
 	}
+}
 
-	// help flag
-	if args[1] == "-h" {
+func flagParse() ParseResult {
+	res := ParseResult{
+		mode:   Client,
+		HEX:    false,
+		thread: 1,
+	}
+	isClientMode := flag.Bool("c", false, "Client mode")
+	isServerMode := flag.Bool("s", false, "Server mode")
+	isHEX := flag.Bool("H", false, "HEX mode")
+	isHelp := flag.Bool("h", false, "Print usage")
+	multithread := flag.Int("m", 1, "Multithreaded mode (Client mode only)")
+	flag.Parse()
+	if isHelp != nil && *isHelp {
 		fmt.Print(HelpText)
 		os.Exit(0)
 	}
+	if isServerMode == nil || !*isServerMode {
+		res.mode = Client
+	} else if *isServerMode && isClientMode == nil || !*isClientMode {
+		res.mode = Server
+	} else {
+		fmt.Println("Can't run server mode and client mode in the same time")
+		os.Exit(1)
+	}
+	if isHEX != nil {
+		res.HEX = *isHEX
+	}
+	if multithread != nil {
+		if *multithread <= 0 {
+			fmt.Println("Thread count must be positive")
+			os.Exit(1)
+		}
+		res.thread = *multithread
+	}
+	if res.mode == Server && res.thread > 1 {
+		fmt.Println("Multithreaded mode can only be used in client mode")
+		os.Exit(1)
+	}
 
 	// try to resolve last arg to TCPAddr
-	tcpAddr, err := net.ResolveTCPAddr("tcp", args[len(args)-1])
+	arg := flag.Arg(0)
+	tcpAddr, err := net.ResolveTCPAddr("tcp", arg)
 	if err != nil {
-		return parseResult, errors.New("illegal tcp address format: " + args[len(args)-1])
+		fmt.Println("Illegal tcp address format: " + arg)
 	}
-	parseResult.tcpAddr = *tcpAddr
-
-	// scan flag in the args
-	flags := make(map[Flag]string)
-	for _, arg := range args[1 : len(args)-1] {
-		switch arg {
-		case "-c":
-			flags[ClientFlag] = ""
-		case "-l":
-			flags[ServerFlag] = ""
-		case "--hex":
-			flags[HexFlag] = ""
-		default:
-			return parseResult, errors.New("illegal flag: " + arg)
-		}
-	}
-	parseResult.flags = flags
-
-	return parseResult, nil
+	res.tcpAddr = *tcpAddr
+	return res
 }
 
 func readInput(ch chan []byte, isHexMode bool, doAfterInput func()) {
