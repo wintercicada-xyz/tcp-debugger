@@ -1,10 +1,13 @@
 # tcp-debugger
-A TCP debuggering tool.
+A TCP debugging tool.
 
 ```
 Usage: td [options][<host>:<port>]
 
 Options
-  -c                       client mode
-  -l                       listener mode
+  -c                   Client mode
+  -s                   Server mode
+  -h                   Print usage
+  -H                   HEX mode
+  -m threadcount       Multithreaded mode (Client mode only)
 ```
