@@ -41,7 +41,10 @@ func clientMode(address net.TCPAddr, isHEX bool, connCount int) {
 		fmt.Print("\r> ")
 		myConn := MyConn{conn, make(chan []byte)}
 		go myConn.HandleWrite()
-		mark := conn.LocalAddr().String()
+		mark := conn.RemoteAddr().String()
+		if connCount > 1 {
+			mark = conn.LocalAddr().String()
+		}
 		go pool.AddConn(myConn, mark)
 		go myConn.HandleReceive(rch, mark)
 	}
