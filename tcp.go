@@ -12,14 +12,6 @@ func clientMode(address net.TCPAddr, isHEX bool, connCount int) {
 	pool := CreatePool()
 	rch := make(chan Message)
 	ich := make(chan []byte)
-	go readInput(ich, isHEX, func() {
-		if !pool.IsEmpty() {
-			fmt.Print("\r> ")
-		} else {
-			fmt.Print("\r \r")
-			os.Exit(0)
-		}
-	})
 	go pool.HandleWriteToAll(ich)
 	go writeMessage(rch, isHEX, func(addr string) {
 		pool.DeleteConn(addr)
@@ -48,6 +40,14 @@ func clientMode(address net.TCPAddr, isHEX bool, connCount int) {
 		go pool.AddConn(myConn, mark)
 		go myConn.HandleReceive(rch, mark)
 	}
+	go readInput(ich, isHEX, func() {
+		if !pool.IsEmpty() {
+			fmt.Print("\r> ")
+		} else {
+			fmt.Print("\r \r")
+			os.Exit(0)
+		}
+	})
 }
 
 func serverMode(address net.TCPAddr, isHEX bool) {

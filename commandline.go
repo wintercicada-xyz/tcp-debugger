@@ -4,6 +4,7 @@ import (
 	"encoding/hex"
 	"flag"
 	"fmt"
+	"io"
 	"net"
 	"os"
 )
@@ -99,6 +100,9 @@ func readInput(ch chan []byte, isHexMode bool, doAfterInput func()) {
 		_, err := fmt.Scanln(&input)
 		if err != nil {
 			fmt.Println("\rFailed to scan user input")
+			if err == io.EOF {
+				os.Exit(1)
+			}
 		} else {
 			if isHexMode {
 				res, err := hex.DecodeString(input)
