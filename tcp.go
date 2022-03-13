@@ -117,6 +117,7 @@ func (pool Pool) AddConn(conn MyConn, mark string) {
 }
 func (pool Pool) DeleteConn(addr string) {
 	pool.lock.Lock()
+	pool.conns[addr].c.Close()
 	delete(pool.conns, addr)
 	pool.lock.Unlock()
 }
@@ -125,7 +126,6 @@ func (pool Pool) HandleWriteToAll(ch chan []byte) {
 	for {
 		msg := <-ch
 		pool.lock.RLock()
-		//fmt.Println(pool.conns)
 		for _, c := range pool.conns {
 			c.ch <- msg
 		}
