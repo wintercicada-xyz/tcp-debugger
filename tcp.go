@@ -10,18 +10,7 @@ import (
 
 func clientMode(address net.TCPAddr, isHEX bool, connCount int) {
 	pool := CreatePool()
-	rch := make(chan Message)
-	ich := make(chan []byte)
-	go pool.HandleWriteToAll(ich)
-	go writeMessage(rch, isHEX, func(addr string) {
-		pool.DeleteConn(addr)
-		if !pool.IsEmpty() {
-			fmt.Print("\r> ")
-		} else {
-			fmt.Print("\r \r")
-			os.Exit(0)
-		}
-	})
+	rch := writeMessage(isHEX)
 	for i := 0; i < connCount; i++ {
 		conn, err := net.DialTCP("tcp", nil, &address)
 		if err != nil {
@@ -35,12 +24,20 @@ func clientMode(address net.TCPAddr, isHEX bool, connCount int) {
 		go myConn.HandleWrite()
 		mark := conn.RemoteAddr().String()
 		if connCount > 1 {
-			mark = conn.LocalAddr().String()
+			mark = addr
 		}
 		go pool.AddConn(myConn, mark)
-		go myConn.HandleReceive(rch, mark)
+		go myConn.HandleReceive(rch, mark, func() {
+			isEmpty := pool.DeleteConn(mark)
+			if !isEmpty {
+				fmt.Print("\r> ")
+			} else {
+				fmt.Print("\r \r")
+				os.Exit(0)
+			}
+		})
 	}
-	go readInput(ich, isHEX, func() {
+	ich := readInput(isHEX, func() {
 		if !pool.IsEmpty() {
 			fmt.Print("\r> ")
 		} else {
@@ -48,6 +45,7 @@ func clientMode(address net.TCPAddr, isHEX bool, connCount int) {
 			os.Exit(0)
 		}
 	})
+	go pool.HandleWriteToAll(ich)
 }
 
 func serverMode(address net.TCPAddr, isHEX bool) {
@@ -58,9 +56,7 @@ func serverMode(address net.TCPAddr, isHEX bool) {
 	defer l.Close()
 
 	pool := CreatePool()
-	rch := make(chan Message)
-	ich := make(chan []byte)
-	go readInput(ich, isHEX, func() {
+	ich := readInput(isHEX, func() {
 		if !pool.IsEmpty() {
 			fmt.Print("\r> ")
 		} else {
@@ -68,14 +64,7 @@ func serverMode(address net.TCPAddr, isHEX bool) {
 		}
 	})
 	go pool.HandleWriteToAll(ich)
-	go writeMessage(rch, isHEX, func(addr string) {
-		pool.DeleteConn(addr)
-		if !pool.IsEmpty() {
-			fmt.Print("\r> ")
-		} else {
-			fmt.Print("\r  \r")
-		}
-	})
+	rch := writeMessage(isHEX)
 	for {
 		conn, err := l.AcceptTCP()
 		if err != nil {
@@ -89,7 +78,15 @@ func serverMode(address net.TCPAddr, isHEX bool) {
 		go myConn.HandleWrite()
 		mark := conn.RemoteAddr().String()
 		go pool.AddConn(myConn, mark)
-		go myConn.HandleReceive(rch, mark)
+		go myConn.HandleReceive(rch, mark, func() {
+			isEmpty := pool.DeleteConn(mark)
+			if !isEmpty {
+				fmt.Print("\r> ")
+			} else {
+				fmt.Print("\r \r")
+				//os.Exit(0)
+			}
+		})
 	}
 }
 
@@ -118,14 +115,15 @@ func (pool Pool) AddConn(conn MyConn, mark string) {
 	pool.conns[mark] = conn
 	pool.lock.Unlock()
 }
-func (pool Pool) DeleteConn(addr string) {
+func (pool Pool) DeleteConn(addr string) bool {
 	pool.lock.Lock()
+	defer pool.lock.Unlock()
 	pool.conns[addr].c.Close()
 	delete(pool.conns, addr)
-	pool.lock.Unlock()
+	return len(pool.conns) == 0
 }
 
-func (pool Pool) HandleWriteToAll(ch chan []byte) {
+func (pool Pool) HandleWriteToAll(ch <-chan []byte) {
 	for {
 		msg := <-ch
 		pool.lock.RLock()
@@ -152,14 +150,14 @@ func (conn MyConn) HandleWrite() {
 	}
 }
 
-func (conn MyConn) HandleReceive(ch chan Message, mark string) {
+func (conn MyConn) HandleReceive(ch chan Message, mark string, deleteConn func()) {
 	buf := make([]byte, 1024)
 	for {
 		reqLen, err := conn.c.Read(buf)
 		if err != nil {
 			if err == net.ErrClosed || err == io.EOF {
 				fmt.Printf("\rConnection to %s closed\n", mark)
-				ch <- Message{mark, []byte{}}
+				deleteConn()
 				break
 			}
 		}

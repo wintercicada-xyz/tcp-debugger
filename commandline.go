@@ -94,42 +94,50 @@ func flagParse() ParseResult {
 	return res
 }
 
-func readInput(ch chan []byte, isHexMode bool, doAfterInput func()) {
-	for {
-		var input string
-		_, err := fmt.Scanln(&input)
-		if err != nil {
-			fmt.Println("\rFailed to scan user input")
-			if err == io.EOF {
-				os.Exit(1)
-			}
-		} else {
-			if isHexMode {
-				res, err := hex.DecodeString(input)
-				if err != nil {
-					fmt.Println(err)
-				} else {
-					ch <- res
+func readInput(isHexMode bool, doAfterInput func()) <-chan []byte {
+	ch := make(chan []byte)
+	go func() {
+		for {
+			var input string
+			_, err := fmt.Scanln(&input)
+			if err != nil {
+				if err.Error() != "unexpected newline" {
+					fmt.Println("\r", err)
+
+					fmt.Println("\rFailed to scan user input")
+				}
+				if err == io.EOF {
+					os.Exit(1)
 				}
 			} else {
-				ch <- []byte(input)
+				if isHexMode {
+					res, err := hex.DecodeString(input)
+					if err != nil {
+						fmt.Println(err)
+					} else {
+						ch <- res
+					}
+				} else {
+					ch <- []byte(input)
+				}
 			}
+			doAfterInput()
 		}
-		doAfterInput()
-	}
+	}()
+	return ch
 }
 
-func writeMessage(ch chan Message, isHexMode bool, handleConnCloseFn func(string)) {
-	for {
-		msg := <-ch
-		if len(msg.msg) == 0 { // conn close
-			handleConnCloseFn(msg.addr)
-		} else {
+func writeMessage(isHexMode bool) chan Message {
+	ch := make(chan Message)
+	go func() {
+		for {
+			msg := <-ch
 			if isHexMode {
 				fmt.Printf("\r%s> % X\n> ", msg.addr, msg.msg)
 			} else {
 				fmt.Printf("\r%s> %s\n> ", msg.addr, msg.msg)
 			}
 		}
-	}
+	}()
+	return ch
 }
