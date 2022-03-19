@@ -17,6 +17,7 @@ func clientMode(address net.TCPAddr, isHEX bool, connCount int) {
 			fmt.Printf("\rTcp dial errors: %v\n", err)
 			continue
 		}
+		conn.SetNoDelay(true)
 		addr := conn.LocalAddr().String()
 		fmt.Printf("\rConnect to server as %v\n", addr)
 		fmt.Print("\r> ")
@@ -71,6 +72,7 @@ func serverMode(address net.TCPAddr, isHEX bool) {
 			fmt.Printf("\rTcp accept errors: %v\n", err)
 			continue
 		}
+		conn.SetNoDelay(true)
 		addr := conn.RemoteAddr().String()
 		fmt.Printf("\rClient %v connect\n", addr)
 		fmt.Print("\r> ")

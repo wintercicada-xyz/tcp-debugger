@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"encoding/hex"
 	"flag"
 	"fmt"
@@ -97,10 +98,18 @@ func flagParse() ParseResult {
 func readInput(isHexMode bool, doAfterInput func()) <-chan []byte {
 	ch := make(chan []byte)
 	go func() {
+		reader := bufio.NewReader(os.Stdin)
 		for {
-			var input string
-			_, err := fmt.Scanln(&input)
+			var err error
+			input, err := reader.ReadString('\n')
+			if len(input) > 1 {
+				input = input[:len(input)-1]
+			} else {
+				continue
+			}
+
 			if err != nil {
+				fmt.Println("\r", err)
 				if err.Error() != "unexpected newline" {
 					fmt.Println("\r", err)
 
