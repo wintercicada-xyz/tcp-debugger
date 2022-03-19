@@ -121,6 +121,7 @@ func (pool Pool) DeleteConn(addr string) bool {
 	pool.lock.Lock()
 	defer pool.lock.Unlock()
 	pool.conns[addr].c.Close()
+	close(pool.conns[addr].ch)
 	delete(pool.conns, addr)
 	return len(pool.conns) == 0
 }
