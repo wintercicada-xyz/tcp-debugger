@@ -90,6 +90,7 @@ func flagParse() ParseResult {
 	tcpAddr, err := net.ResolveTCPAddr("tcp", arg)
 	if err != nil {
 		fmt.Println("Illegal tcp address format: " + arg)
+		os.Exit(1)
 	}
 	res.tcpAddr = *tcpAddr
 	return res
